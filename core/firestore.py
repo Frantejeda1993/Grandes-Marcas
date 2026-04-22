@@ -69,7 +69,32 @@ def _read_service_account_from_local_file() -> Optional[Dict[str, Any]]:
 
 
 def _build_service_account_info() -> Dict[str, Any]:
-    """Construye un dict válido de service account desde secretos o archivo local."""
+    """
+    Construye el dict de service account desde:
+      1. st.secrets["firebase"]["service_account_b64"] — base64 del JSON completo (más robusto)
+      2. st.secrets["firebase"] con campos individuales (legacy)
+      3. firebase_key.json local (desarrollo)
+    """
+    # ── Modo 1: base64 del JSON completo ─────────────────────────────────────
+    if "firebase" in st.secrets:
+        b64_val = st.secrets["firebase"].get("service_account_b64", "")
+        if b64_val and b64_val.strip():
+            try:
+                decoded_json = base64.b64decode(b64_val.strip()).decode("utf-8")
+                info = json.loads(decoded_json)
+                # Verificación mínima
+                required = ["project_id", "client_email", "private_key"]
+                missing = [k for k in required if not str(info.get(k, "")).strip()]
+                if not missing:
+                    return info
+            except Exception as exc:
+                raise RuntimeError(
+                    "No se pudo decodificar firebase.service_account_b64. "
+                    "Asegúrate de que es el JSON completo codificado en base64. "
+                    f"Detalle: {exc}"
+                ) from exc
+
+    # ── Modo 2: campos individuales en st.secrets ────────────────────────────
     if "firebase" in st.secrets:
         info = dict(st.secrets["firebase"])
     else:
