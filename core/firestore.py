@@ -136,7 +136,7 @@ def load_edi_flat() -> pd.DataFrame:
     """
     db = get_db()
     try:
-        docs = db.collection("edi_semanal").stream(timeout=20, retry=None)
+        docs = list(db.collection("edi_semanal").stream())
     except Exception as exc:
         if _looks_like_invalid_jwt_signature(exc):
             # En Streamlit Cloud puede quedar un app Firebase viejo en memoria
@@ -144,10 +144,10 @@ def load_edi_flat() -> pd.DataFrame:
             _reset_firebase_apps()
             init_db.clear()
             db = get_db()
-            docs = db.collection("edi_semanal").stream(timeout=20, retry=None)
+            docs = list(db.collection("edi_semanal").stream())
         else:
             raise RuntimeError(
-                "No fue posible leer Firestore (edi_semanal). Revisa firma JWT/private_key en secrets."
+                f"No fue posible leer Firestore (edi_semanal). Error original: {exc}"
             ) from exc
 
     records: List[Dict] = []
@@ -161,7 +161,7 @@ def load_edi_flat() -> pd.DataFrame:
                 records.append(r)
     except Exception as exc:
         raise RuntimeError(
-            "Error al consultar Firestore. En Streamlit Cloud, valida que firebase.private_key conserve saltos de línea."
+            f"Error al iterar documentos Firestore. Detalle: {exc}"
         ) from exc
 
     if not records:
@@ -201,13 +201,13 @@ def load_collection(name: str) -> List[Dict]:
     """Carga todos los documentos de una colección como lista de dicts."""
     db = get_db()
     try:
-        return [{"_id": d.id, **d.to_dict()} for d in db.collection(name).stream(timeout=20, retry=None)]
+        return [{"_id": d.id, **d.to_dict()} for d in db.collection(name).stream()]
     except Exception as exc:
         if _looks_like_invalid_jwt_signature(exc):
             _reset_firebase_apps()
             init_db.clear()
             db = get_db()
-            return [{"_id": d.id, **d.to_dict()} for d in db.collection(name).stream(timeout=20, retry=None)]
+            return [{"_id": d.id, **d.to_dict()} for d in db.collection(name).stream()]
         raise RuntimeError(
             f"No se pudo cargar la colección '{name}' desde Firestore."
         ) from exc
