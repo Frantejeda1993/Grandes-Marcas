@@ -8,13 +8,16 @@ import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore as fs
 import pandas as pd
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from google.oauth2 import service_account
+import base64
+import json
+from pathlib import Path
 
 
 def _normalize_private_key(private_key: str) -> str:
     """Normaliza private_key para tolerar formatos frecuentes en Streamlit Cloud."""
-    key = (private_key or "").strip().replace("\\r", "\r")
+    key = (private_key or "").strip().strip('"').strip("'").replace("\\r", "\r")
     # Caso 1: la clave viene con saltos escapados en una sola línea.
     if "\\n" in key:
         key = key.replace("\\n", "\n")
@@ -23,14 +26,63 @@ def _normalize_private_key(private_key: str) -> str:
     return key
 
 
+def _decode_private_key_if_base64(private_key: str) -> str:
+    """Decodifica private_key si viene en base64 (patrón común en CI/CD)."""
+    key = _normalize_private_key(private_key)
+    if "BEGIN PRIVATE KEY" in key:
+        return key
+    try:
+        decoded = base64.b64decode(key).decode("utf-8")
+    except Exception:
+        return key
+    decoded_key = _normalize_private_key(decoded)
+    if "BEGIN PRIVATE KEY" in decoded_key:
+        return decoded_key
+    return key
+
+
+def _read_service_account_from_local_file() -> Optional[Dict[str, Any]]:
+    """Fallback local para desarrollo fuera de Streamlit Cloud."""
+    json_path = Path("firebase_key.json")
+    if not json_path.exists():
+        return None
+    try:
+        return json.loads(json_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _build_service_account_info() -> Dict[str, Any]:
+    """Construye un dict válido de service account desde secretos o archivo local."""
+    if "firebase" in st.secrets:
+        info = dict(st.secrets["firebase"])
+    else:
+        info = _read_service_account_from_local_file() or {}
+
+    if not info:
+        raise RuntimeError(
+            "No se encontraron credenciales Firebase en st.secrets['firebase'] ni en firebase_key.json."
+        )
+
+    if "private_key" in info:
+        info["private_key"] = _decode_private_key_if_base64(info.get("private_key", ""))
+
+    required = ["project_id", "client_email", "private_key"]
+    missing = [k for k in required if not str(info.get(k, "")).strip()]
+    if missing:
+        raise RuntimeError(
+            f"Faltan campos requeridos en credenciales Firebase: {', '.join(missing)}."
+        )
+    return info
+
+
 # ─── Inicialización ───────────────────────────────────────────────────────────
 
 @st.cache_resource
 def init_db():
     """Inicializa la app Firebase y devuelve el cliente Firestore (singleton)."""
     if not firebase_admin._apps:
-        key_dict = dict(st.secrets["firebase"])
-        key_dict["private_key"] = _normalize_private_key(key_dict.get("private_key", ""))
+        key_dict = _build_service_account_info()
         try:
             # Validación temprana de estructura y firma local.
             service_account.Credentials.from_service_account_info(key_dict)
