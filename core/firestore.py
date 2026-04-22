@@ -15,6 +15,12 @@ import json
 from pathlib import Path
 
 
+def _looks_like_invalid_jwt_signature(exc: Exception) -> bool:
+    """Detecta errores de credenciales revocadas/desincronizadas en runtime."""
+    msg = str(exc).lower()
+    return "invalid jwt signature" in msg or "invalid_grant" in msg
+
+
 def _normalize_private_key(private_key: str) -> str:
     """Normaliza private_key para tolerar formatos frecuentes en Streamlit Cloud."""
     key = (private_key or "").strip().strip('"').strip("'").replace("\\r", "\r")
@@ -76,6 +82,12 @@ def _build_service_account_info() -> Dict[str, Any]:
     return info
 
 
+def _reset_firebase_apps() -> None:
+    """Elimina apps Firebase inicializadas para forzar re-autenticación."""
+    for app in list(firebase_admin._apps.values()):
+        firebase_admin.delete_app(app)
+
+
 # ─── Inicialización ───────────────────────────────────────────────────────────
 
 @st.cache_resource
@@ -115,9 +127,17 @@ def load_edi_flat() -> pd.DataFrame:
     try:
         docs = db.collection("edi_semanal").stream(timeout=20, retry=None)
     except Exception as exc:
-        raise RuntimeError(
-            "No fue posible leer Firestore (edi_semanal). Revisa firma JWT/private_key en secrets."
-        ) from exc
+        if _looks_like_invalid_jwt_signature(exc):
+            # En Streamlit Cloud puede quedar un app Firebase viejo en memoria
+            # (por ejemplo tras rotación de claves). Reintentar con app limpia.
+            _reset_firebase_apps()
+            init_db.clear()
+            db = get_db()
+            docs = db.collection("edi_semanal").stream(timeout=20, retry=None)
+        else:
+            raise RuntimeError(
+                "No fue posible leer Firestore (edi_semanal). Revisa firma JWT/private_key en secrets."
+            ) from exc
 
     records: List[Dict] = []
     try:
@@ -172,6 +192,11 @@ def load_collection(name: str) -> List[Dict]:
     try:
         return [{"_id": d.id, **d.to_dict()} for d in db.collection(name).stream(timeout=20, retry=None)]
     except Exception as exc:
+        if _looks_like_invalid_jwt_signature(exc):
+            _reset_firebase_apps()
+            init_db.clear()
+            db = get_db()
+            return [{"_id": d.id, **d.to_dict()} for d in db.collection(name).stream(timeout=20, retry=None)]
         raise RuntimeError(
             f"No se pudo cargar la colección '{name}' desde Firestore."
         ) from exc
