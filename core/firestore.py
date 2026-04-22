@@ -47,6 +47,16 @@ def _decode_private_key_if_base64(private_key: str) -> str:
     return key
 
 
+def _validate_private_key_pem(private_key: str) -> None:
+    """Valida formato PEM mínimo para fallar rápido con mensaje accionable."""
+    key = _normalize_private_key(private_key)
+    if "BEGIN PRIVATE KEY" not in key or "END PRIVATE KEY" not in key:
+        raise RuntimeError(
+            "firebase.private_key no tiene formato PEM válido. "
+            "Debe incluir '-----BEGIN PRIVATE KEY-----' y '-----END PRIVATE KEY-----'."
+        )
+
+
 def _read_service_account_from_local_file() -> Optional[Dict[str, Any]]:
     """Fallback local para desarrollo fuera de Streamlit Cloud."""
     json_path = Path("firebase_key.json")
@@ -72,6 +82,7 @@ def _build_service_account_info() -> Dict[str, Any]:
 
     if "private_key" in info:
         info["private_key"] = _decode_private_key_if_base64(info.get("private_key", ""))
+        _validate_private_key_pem(info["private_key"])
 
     required = ["project_id", "client_email", "private_key"]
     missing = [k for k in required if not str(info.get(k, "")).strip()]
