@@ -8,7 +8,7 @@ import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore as fs
 import pandas as pd
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 
 # ─── Inicialización ───────────────────────────────────────────────────────────
@@ -20,9 +20,19 @@ def init_db():
         key_dict = dict(st.secrets["firebase"])
         # Streamlit Cloud almacena \\n literales en private_key
         key_dict["private_key"] = key_dict["private_key"].replace("\\n", "\n")
-        cred = credentials.Certificate(key_dict)
+        try:
+            cred = credentials.Certificate(key_dict)
+        except Exception as exc:
+            raise RuntimeError(
+                "Credenciales Firebase inválidas. Revisa [firebase] en .streamlit/secrets.toml"
+            ) from exc
         firebase_admin.initialize_app(cred)
-    return fs.client()
+    try:
+        return fs.client()
+    except Exception as exc:
+        raise RuntimeError(
+            "No se pudo crear el cliente Firestore. Verifica project_id y credenciales."
+        ) from exc
 
 
 def get_db():
@@ -37,16 +47,26 @@ def load_edi_flat() -> pd.DataFrame:
     Cada documento contiene semanas de registros agrupados (reduce lecturas).
     """
     db = get_db()
-    docs = db.collection("edi_semanal").stream()
+    try:
+        docs = db.collection("edi_semanal").stream(timeout=40)
+    except Exception as exc:
+        raise RuntimeError(
+            "No fue posible leer Firestore (edi_semanal). Revisa firma JWT/private_key en secrets."
+        ) from exc
 
     records: List[Dict] = []
-    for doc in docs:
-        data = doc.to_dict()
-        week_records = data.get("records", [])
-        for r in week_records:
-            r.setdefault("año", data.get("año"))
-            r.setdefault("semana", data.get("semana"))
-            records.append(r)
+    try:
+        for doc in docs:
+            data = doc.to_dict()
+            week_records = data.get("records", [])
+            for r in week_records:
+                r.setdefault("año", data.get("año"))
+                r.setdefault("semana", data.get("semana"))
+                records.append(r)
+    except Exception as exc:
+        raise RuntimeError(
+            "Error al consultar Firestore. En Streamlit Cloud, valida que firebase.private_key conserve saltos de línea."
+        ) from exc
 
     if not records:
         return pd.DataFrame()
@@ -84,7 +104,12 @@ def load_edi_flat() -> pd.DataFrame:
 def load_collection(name: str) -> List[Dict]:
     """Carga todos los documentos de una colección como lista de dicts."""
     db = get_db()
-    return [{"_id": d.id, **d.to_dict()} for d in db.collection(name).stream()]
+    try:
+        return [{"_id": d.id, **d.to_dict()} for d in db.collection(name).stream(timeout=30)]
+    except Exception as exc:
+        raise RuntimeError(
+            f"No se pudo cargar la colección '{name}' desde Firestore."
+        ) from exc
 
 
 # ─── Escritura EDI (upsert semanal) ────────────────────────────────────────────

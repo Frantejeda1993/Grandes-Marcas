@@ -202,8 +202,17 @@ if "semanas_objetivo" not in st.session_state:
         st.session_state["semanas_objetivo"] = 8
 
 # ─── Cargar DataFrame maestro ─────────────────────────────────────────────────
-with st.spinner("📡 Sincronizando datos…"):
-    df_master = load_edi_flat()
+try:
+    with st.spinner("📡 Sincronizando datos…"):
+        df_master = load_edi_flat()
+except Exception as exc:
+    st.error(
+        "❌ **No se pudieron sincronizar los datos de Firestore.**\n\n"
+        "Si estás en Streamlit Cloud, valida `firebase.private_key` en "
+        "`.streamlit/secrets.toml` (debe conservar saltos de línea reales).\n\n"
+        f"Detalle: `{exc}`"
+    )
+    st.stop()
 
 st.session_state["df_master"] = df_master
 
