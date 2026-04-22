@@ -209,7 +209,8 @@ except Exception as exc:
     st.error(
         "❌ **No se pudieron sincronizar los datos de Firestore.**\n\n"
         "Si estás en Streamlit Cloud, valida `firebase.private_key` en "
-        "`.streamlit/secrets.toml` (debe conservar saltos de línea reales).\n\n"
+        "`.streamlit/secrets.toml` (debe conservar saltos de línea reales) y "
+        "que la clave del service account siga activa en Google Cloud.\n\n"
         f"Detalle: `{exc}`"
     )
     st.stop()
